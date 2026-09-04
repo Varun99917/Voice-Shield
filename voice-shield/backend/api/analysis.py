@@ -166,9 +166,11 @@ async def analyze_demo(
     force_result: str = Query(None, description="Force 'real' or 'fake' result for demo")
 ):
     """
-    Demo analysis endpoint - generates synthetic audio
-    ONLY for testing when no real audio is available
+    Demo analysis endpoint
+    Uses force_result parameter to determine outcome
     """
+    import random
+    
     async with async_session_maker() as session:
         result = await session.execute(
             select(User).where(User.email == current_user["email"])
@@ -181,65 +183,55 @@ async def analyze_demo(
                 detail="User not found"
             )
         
-        import io, wave, struct, math, random
-        
+        # Use force_result directly
         if force_result == "fake":
-            is_cloned_demo = True
+            is_cloned = True
+            risk_score = round(random.uniform(72, 92), 2)
+            risk_level = "high" if risk_score < 82 else "critical"
+            confidence = round(random.uniform(0.85, 0.95), 4)
+            details = "AI/synthetic voice patterns detected. Spectral analysis reveals uniform frequency patterns, unnatural prosody, and digital artifacts consistent with TTS or voice cloning."
         elif force_result == "real":
-            is_cloned_demo = False
+            is_cloned = False
+            risk_score = round(random.uniform(12, 32), 2)
+            risk_level = "safe" if risk_score < 20 else "low"
+            confidence = round(random.uniform(0.85, 0.95), 4)
+            details = "Natural voice patterns confirmed. Spectral analysis shows authentic vocal cord vibrations, natural pitch variations, and phase consistency typical of genuine human speech."
         else:
-            is_cloned_demo = random.random() < 0.5
-        
-        sample_rate = 16000
-        duration = 2
-        num_samples = sample_rate * duration
-        audio_buffer = io.BytesIO()
-        with wave.open(audio_buffer, 'wb') as wav:
-            wav.setnchannels(1)
-            wav.setsampwidth(2)
-            wav.setframerate(sample_rate)
-            for i in range(num_samples):
-                if is_cloned_demo:
-                    freq = 440 + random.randint(-5, 5)
-                    amp = 0.3
-                else:
-                    freq = 440 + random.randint(-30, 30)
-                    amp = 0.2 + random.random() * 0.2
-                sample = int(32767 * amp * math.sin(2 * math.pi * freq * i / sample_rate))
-                wav.writeframes(struct.pack('<h', sample))
-        audio_bytes = audio_buffer.getvalue()
-        
-        ml_result = await call_ml_model(audio_bytes)
-        
-        if force_result:
-            if force_result == "fake":
-                ml_result["is_cloned"] = True
-                ml_result["risk_score"] = random.uniform(70, 90)
-                ml_result["confidence"] = random.uniform(0.85, 0.95)
-                ml_result["risk_level"] = "high" if ml_result["risk_score"] < 80 else "critical"
-                ml_result["analysis_details"] = "Voice clone detected! Synthetic/TTS patterns identified."
+            # Random - 50/50
+            is_cloned = random.random() < 0.5
+            if is_cloned:
+                risk_score = round(random.uniform(65, 85), 2)
+                risk_level = "high"
+                confidence = round(random.uniform(0.80, 0.90), 4)
+                details = "Potential AI voice patterns detected."
             else:
-                ml_result["is_cloned"] = False
-                ml_result["risk_score"] = random.uniform(15, 35)
-                ml_result["confidence"] = random.uniform(0.85, 0.95)
-                ml_result["risk_level"] = "safe" if ml_result["risk_score"] < 20 else "low"
-                ml_result["analysis_details"] = "Voice appears authentic with natural variations."
+                risk_score = round(random.uniform(20, 40), 2)
+                risk_level = "low"
+                confidence = round(random.uniform(0.80, 0.90), 4)
+                details = "Voice appears natural with typical human characteristics."
+        
+        # Generate individual score breakdown based on overall risk
+        base = risk_score
+        spectral = round(min(100, max(0, base + random.uniform(-8, 8))), 2)
+        prosody = round(min(100, max(0, base + random.uniform(-8, 8))), 2)
+        phase = round(min(100, max(0, base + random.uniform(-8, 8))), 2)
+        pattern = round(min(100, max(0, base + random.uniform(-8, 8))), 2)
         
         analysis = Analysis(
             user_id=user.id,
             audio_filename="demo_recording.wav",
-            risk_score=ml_result["risk_score"],
-            risk_level=RiskLevel(ml_result["risk_level"]),
-            is_cloned=ml_result["is_cloned"],
-            confidence=ml_result["confidence"],
-            spectral_score=ml_result.get("spectral_score"),
-            prosody_score=ml_result.get("prosody_score"),
-            phase_score=ml_result.get("phase_score"),
-            pattern_score=ml_result.get("pattern_score"),
-            analysis_details=ml_result.get("analysis_details"),
-            ml_source=ml_result.get("ml_source", "simulated"),
-            audio_duration=ml_result.get("audio_duration"),
-            sample_rate=ml_result.get("sample_rate")
+            risk_score=risk_score,
+            risk_level=RiskLevel(risk_level),
+            is_cloned=is_cloned,
+            confidence=confidence,
+            spectral_score=spectral,
+            prosody_score=prosody,
+            phase_score=phase,
+            pattern_score=pattern,
+            analysis_details=details,
+            ml_source="deepvoiceguard-demo",
+            audio_duration=2.0,
+            sample_rate=16000
         )
         
         session.add(analysis)
@@ -248,12 +240,12 @@ async def analyze_demo(
         
         alert_triggered = False
         alert_id = None
-        if ml_result["is_cloned"] and ml_result["risk_score"] >= 70:
+        if is_cloned and risk_score >= 70:
             alert = Alert(
                 user_id=user.id,
                 analysis_id=analysis.id,
                 alert_type="cloned_voice",
-                severity=RiskLevel(ml_result["risk_level"]),
+                severity=RiskLevel(risk_level),
                 title="Voice Clone Detected",
                 message=f"High risk voice clone detected in demo"
             )
